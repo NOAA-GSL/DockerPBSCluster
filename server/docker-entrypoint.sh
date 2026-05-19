@@ -58,6 +58,9 @@ sudo /opt/pbs/bin/qmgr -c "create hook default_output_dir" 2>/dev/null || true
 sudo /opt/pbs/bin/qmgr -c "set hook default_output_dir event = queuejob"
 sudo /opt/pbs/bin/qmgr -c "import hook default_output_dir application/x-python default /tmp/default_output_dir.py"
 
+# Regenerate SSH host keys (keys are not baked into the image)
+sudo ssh-keygen -A
+
 # Start SSH
 sudo service ssh start
 

@@ -1,7 +1,18 @@
-FROM ubuntu:latest
+ARG UBUNTU_BASE=ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64
+FROM ${UBUNTU_BASE}
 
 ARG OPENPBS_VERSION=23.06.06
 ARG DEBIAN_FRONTEND=noninteractive
+
+# Pin PostgreSQL 16: ubuntu 26.04 ships pg18, which OpenPBS 23.x does not
+# support.  Add the official PGDG repo so we can install a compatible version.
+RUN apt-get update -y && apt-get install -y wget ca-certificates gnupg \
+ && install -d /usr/share/keyrings \
+ && wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] https://apt.postgresql.org/pub/repos/apt resolute-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list \
+ && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
 RUN apt-get update -y && apt-get install -y \
@@ -19,8 +30,7 @@ RUN apt-get update -y && apt-get install -y \
     python3 \
     python3-dev \
     libpq-dev \
-    postgresql \
-    postgresql-contrib \
+    postgresql-16 \
     libical-dev \
     libedit-dev \
     libhwloc-dev \
@@ -32,21 +42,20 @@ RUN apt-get update -y && apt-get install -y \
     tcl-dev \
     tk-dev \
     libxt-dev \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -f /etc/ssh/ssh_host_* \
+ && rm -f /etc/ssl/private/ssl-cert-snakeoil.key \
+ && rm -f /etc/ssl/certs/ssl-cert-snakeoil.pem
 
 # Create stub eval.h for Python 3.13+ compatibility (header removed but API still present)
 RUN python3 -c "import sysconfig; open(sysconfig.get_path('include')+'/eval.h','w').write('#pragma once\n')"
 
-# Clone OpenPBS source
-RUN git clone --branch v${OPENPBS_VERSION} --depth 1 https://github.com/openpbs/openpbs.git /tmp/openpbs
-
-# Configure OpenPBS
-RUN cd /tmp/openpbs \
+# Clone, configure, build and install OpenPBS in a single layer so that no
+# intermediate artefacts (including test keys in ci/) are committed to the image.
+RUN git clone --branch v${OPENPBS_VERSION} --depth 1 https://github.com/openpbs/openpbs.git /tmp/openpbs \
+ && cd /tmp/openpbs \
  && ./autogen.sh \
- && ./configure --prefix=/opt/pbs CFLAGS="-Wno-incompatible-pointer-types -std=gnu11"
-
-# Build and install OpenPBS
-RUN cd /tmp/openpbs \
+ && ./configure --prefix=/opt/pbs CFLAGS="-Wno-incompatible-pointer-types -std=gnu11" \
  && make -j$(nproc) \
  && make install \
  && /opt/pbs/libexec/pbs_postinstall \
@@ -58,10 +67,11 @@ RUN useradd -r -m -d /var/lib/pbsdata -s /bin/sh -G postgres pbsdata
 # Fix the db_user file: pbs_postinstall writes "postgres" but we use pbsdata
 RUN echo -n pbsdata > /var/spool/pbs/server_priv/db_user
 
-# Symlink PostgreSQL server binaries into /usr/bin so pbs_db_utility can find them via PATH under sudo
-RUN pg_bindir=$(pg_config --bindir) && \
-    for bin in initdb pg_ctl createdb psql pg_config; do \
-        ln -sf ${pg_bindir}/${bin} /usr/bin/${bin}; \
+# Symlink PostgreSQL 16 server binaries into /usr/bin so pbs_db_utility can
+# find them via PATH under sudo.  Hardcode the pg16 path so this is not
+# affected by whichever pg_config libpq-dev exposes.
+RUN for bin in initdb pg_ctl createdb psql pg_config; do \
+        ln -sf /usr/lib/postgresql/16/bin/${bin} /usr/bin/${bin}; \
     done
 
 # Configure PBS as server

@@ -10,6 +10,9 @@ echo '$usecp *:/home/admin /home/admin' | sudo tee -a /var/spool/pbs/mom_priv/co
 # Start pbs_mom
 sudo /opt/pbs/sbin/pbs_mom
 
+# Regenerate SSH host keys (keys are not baked into the image)
+sudo ssh-keygen -A
+
 # Start SSH
 sudo service ssh start
 
