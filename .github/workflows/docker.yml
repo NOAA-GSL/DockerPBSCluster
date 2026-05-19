@@ -1,0 +1,681 @@
+name: Docker PBS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  OPENPBS_VERSION: 23.06.06
+  REGISTRY_SERVER_IMAGE: ghcr.io/noaa-gsl/dockerpbscluster/pbs-server
+  REGISTRY_FRONTEND_IMAGE: ghcr.io/noaa-gsl/dockerpbscluster/pbs-frontend
+  REGISTRY_MOM_IMAGE: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom
+
+jobs:
+
+  docker_compose_test:
+    name: Docker Compose Test
+    runs-on: ubuntu2204-4c-16g-150ssd
+
+    steps:
+      -
+        name: Checkout Repository
+        uses: actions/checkout@v4
+      -
+        name: Build and start containers
+        run: docker compose -f docker-compose.yml up --build -d
+
+      -
+        name: Check cluster logs
+        run: docker compose -f docker-compose.yml logs
+
+      -
+        name: Check status of the cluster containers
+        run: docker compose -f docker-compose.yml ps
+
+      -
+        name: Wait for PBS cluster to be ready
+        run: |
+          echo "Waiting for PBS nodes to become free..."
+          for i in $(seq 1 60); do
+            free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free'" 2>/dev/null || echo 0)
+            echo "Attempt $i: $free nodes free"
+            [ "$free" -ge 3 ] && echo "All 3 nodes ready" && break
+            sleep 5
+          done
+
+      -
+        name: Check status of PBS server
+        run: docker exec pbs-server bash -lc "qstat -Bf"
+
+      -
+        name: Check status of PBS nodes
+        run: docker exec pbs-server bash -lc "pbsnodes -a"
+
+      -
+        name: Run a PBS job
+        run: |
+          docker exec pbs-frontend bash -lc "echo hostname | qsub"
+          sleep 15
+          docker exec pbs-server bash -lc "qstat -x"
+
+      -
+        name: Test SSH access to PBS compute nodes
+        run: |
+          docker exec pbs-frontend bash -lc "timeout 5s ssh pbsnode1 hostname"
+          docker exec pbs-frontend bash -lc "timeout 5s ssh pbsnode2 hostname"
+          docker exec pbs-frontend bash -lc "timeout 5s ssh pbsnode3 hostname"
+
+      -
+        name: Shut down PBS cluster containers
+        run: docker compose -f docker-compose.yml down
+
+  resolve_versions:
+    name: Resolve Version Tags
+    runs-on: ubuntu-latest
+    outputs:
+      ubuntu_version: ${{ steps.resolve.outputs.ubuntu_version }}
+    steps:
+      -
+        name: Resolve concrete ubuntu:latest version
+        id: resolve
+        run: |
+          UBUNTU_VERSION=$(docker run --rm ubuntu:latest bash -lc '. /etc/os-release && echo "$VERSION_ID"')
+          echo "ubuntu_version=${UBUNTU_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ubuntu:latest to VERSION_ID=${UBUNTU_VERSION}"
+
+  build-server-arm64:
+    runs-on: ubuntu-24.04-arm
+    needs:
+      - docker_compose_test
+      - resolve_versions
+    timeout-minutes: 360
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_SERVER_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Prune pre-loaded GHA docker images
+        run: |
+          docker images
+          docker image prune -a -f
+          docker images
+      -
+        name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          platforms: linux/arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/server-cache-arm64:cache
+          cache-to: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/server-cache-arm64:cache,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_SERVER_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      -
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      -
+        name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-digests-linux-arm64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-server-amd64:
+    runs-on: ubuntu-latest
+    needs:
+      - docker_compose_test
+      - resolve_versions
+    timeout-minutes: 360
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_SERVER_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Prune pre-loaded GHA docker images
+        run: |
+          docker images
+          docker image prune -a -f
+          docker images
+      -
+        name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          platforms: linux/amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/server-cache-amd64:cache
+          cache-to: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/server-cache-amd64:cache,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_SERVER_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      -
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      -
+        name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-digests-linux-amd64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-server:
+    runs-on: ubuntu-latest
+    needs:
+      - build-server-amd64
+      - build-server-arm64
+      - resolve_versions
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: server-digests-*
+          merge-multiple: true
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_SERVER_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_SERVER_IMAGE }}@sha256:%s ' *)
+      -
+        name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_SERVER_IMAGE }}:${{ steps.meta.outputs.version }}
+
+  build-mom-arm64:
+    runs-on: ubuntu-24.04-arm
+    needs:
+      - docker_compose_test
+      - resolve_versions
+    timeout-minutes: 360
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_MOM_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Prune pre-loaded GHA docker images
+        run: |
+          docker images
+          docker image prune -a -f
+          docker images
+      -
+        name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mom
+          file: ./mom/Dockerfile
+          platforms: linux/arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/mom-cache-arm64:cache
+          cache-to: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/mom-cache-arm64:cache,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_MOM_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      -
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      -
+        name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mom-digests-linux-arm64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-mom-amd64:
+    runs-on: ubuntu-latest
+    needs:
+      - docker_compose_test
+      - resolve_versions
+    timeout-minutes: 360
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_MOM_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Prune pre-loaded GHA docker images
+        run: |
+          docker images
+          docker image prune -a -f
+          docker images
+      -
+        name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mom
+          file: ./mom/Dockerfile
+          platforms: linux/amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/mom-cache-amd64:cache
+          cache-to: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/mom-cache-amd64:cache,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_MOM_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      -
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      -
+        name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mom-digests-linux-amd64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-mom:
+    runs-on: ubuntu-latest
+    needs:
+      - build-mom-amd64
+      - build-mom-arm64
+      - resolve_versions
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: mom-digests-*
+          merge-multiple: true
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_MOM_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_MOM_IMAGE }}@sha256:%s ' *)
+      -
+        name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_MOM_IMAGE }}:${{ steps.meta.outputs.version }}
+
+  build-frontend-arm64:
+    runs-on: ubuntu-24.04-arm
+    needs:
+      - docker_compose_test
+      - resolve_versions
+    timeout-minutes: 360
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_FRONTEND_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Prune pre-loaded GHA docker images
+        run: |
+          docker images
+          docker image prune -a -f
+          docker images
+      -
+        name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/frontend-cache-arm64:cache
+          cache-to: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/frontend-cache-arm64:cache,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_FRONTEND_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      -
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      -
+        name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-digests-linux-arm64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-frontend-amd64:
+    runs-on: ubuntu-latest
+    needs:
+      - docker_compose_test
+      - resolve_versions
+    timeout-minutes: 360
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_FRONTEND_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Prune pre-loaded GHA docker images
+        run: |
+          docker images
+          docker image prune -a -f
+          docker images
+      -
+        name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/frontend-cache-amd64:cache
+          cache-to: type=registry,ref=ghcr.io/noaa-gsl/dockerpbscluster/frontend-cache-amd64:cache,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_FRONTEND_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      -
+        name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      -
+        name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-digests-linux-amd64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-frontend:
+    runs-on: ubuntu-latest
+    needs:
+      - build-frontend-amd64
+      - build-frontend-arm64
+      - resolve_versions
+    permissions:
+      packages: write
+      contents: read
+      id-token: write
+    steps:
+      -
+        name: Checkout repository
+        uses: actions/checkout@v4
+      -
+        name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: frontend-digests-*
+          merge-multiple: true
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_FRONTEND_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=ubuntu-${{ needs.resolve_versions.outputs.ubuntu_version }}-openpbs-${{ env.OPENPBS_VERSION }}
+          flavor: |
+            latest=true
+            prefix=
+            suffix=
+      -
+        name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+      -
+        name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_FRONTEND_IMAGE }}@sha256:%s ' *)
+      -
+        name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_FRONTEND_IMAGE }}:${{ steps.meta.outputs.version }}

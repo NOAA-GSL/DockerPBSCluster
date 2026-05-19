@@ -1,0 +1,2 @@
+Host pbsnode* pbsfrontend pbsserver
+   StrictHostKeyChecking no

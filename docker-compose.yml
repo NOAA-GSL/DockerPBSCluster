@@ -1,0 +1,76 @@
+services:
+  pbsserver:
+        build:
+          context: ./server
+          dockerfile: Dockerfile
+        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-server:latest
+        container_name: pbs-server
+        shm_size: '4g'
+        hostname: pbsserver
+        user: admin
+        volumes:
+                - shared-vol:/home/admin
+        ports:
+                - 15001:15001
+                - 15003:15003
+                - 17001:17001
+  pbsfrontend:
+        build:
+          context: ./frontend
+          dockerfile: Dockerfile
+        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-frontend:latest
+        container_name: pbs-frontend
+        shm_size: '4g'
+        hostname: pbsfrontend
+        user: admin
+        volumes:
+                - shared-vol:/home/admin:nocopy
+        links:
+                - pbsserver
+  pbsnode1:
+        build:
+          context: ./mom
+          dockerfile: Dockerfile
+        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom:latest
+        container_name: pbs-node1
+        shm_size: '4g'
+        hostname: pbsnode1
+        user: admin
+        volumes:
+                - shared-vol:/home/admin:nocopy
+        environment:
+                - PBS_NODENAME=pbsnode1
+        links:
+                - pbsserver
+  pbsnode2:
+        build:
+          context: ./mom
+          dockerfile: Dockerfile
+        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom:latest
+        container_name: pbs-node2
+        shm_size: '4g'
+        hostname: pbsnode2
+        user: admin
+        volumes:
+                - shared-vol:/home/admin:nocopy
+        environment:
+                - PBS_NODENAME=pbsnode2
+        links:
+                - pbsserver
+  pbsnode3:
+        build:
+          context: ./mom
+          dockerfile: Dockerfile
+        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom:latest
+        container_name: pbs-node3
+        shm_size: '4g'
+        hostname: pbsnode3
+        user: admin
+        volumes:
+                - shared-vol:/home/admin:nocopy
+        environment:
+                - PBS_NODENAME=pbsnode3
+        links:
+                - pbsserver
+volumes:
+        shared-vol:
