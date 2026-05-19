@@ -32,21 +32,19 @@ RUN apt-get update -y && apt-get install -y \
     tk-dev \
     libxt-dev \
  && rm -rf /var/lib/apt/lists/* \
- && rm -f /etc/ssh/ssh_host_*
+ && rm -f /etc/ssh/ssh_host_* \
+ && rm -f /etc/ssl/private/ssl-cert-snakeoil.key \
+ && rm -f /etc/ssl/certs/ssl-cert-snakeoil.pem
 
 # Create stub eval.h for Python 3.13+ compatibility (header removed but API still present)
 RUN python3 -c "import sysconfig; open(sysconfig.get_path('include')+'/eval.h','w').write('#pragma once\n')"
 
-# Clone OpenPBS source
-RUN git clone --branch v${OPENPBS_VERSION} --depth 1 https://github.com/openpbs/openpbs.git /tmp/openpbs
-
-# Configure OpenPBS
-RUN cd /tmp/openpbs \
+# Clone, configure, build and install OpenPBS in a single layer so that no
+# intermediate artefacts (including test keys in ci/) are committed to the image.
+RUN git clone --branch v${OPENPBS_VERSION} --depth 1 https://github.com/openpbs/openpbs.git /tmp/openpbs \
+ && cd /tmp/openpbs \
  && ./autogen.sh \
- && ./configure --prefix=/opt/pbs CFLAGS="-Wno-incompatible-pointer-types -std=gnu11"
-
-# Build and install OpenPBS
-RUN cd /tmp/openpbs \
+ && ./configure --prefix=/opt/pbs CFLAGS="-Wno-incompatible-pointer-types -std=gnu11" \
  && make -j$(nproc) \
  && make install \
  && /opt/pbs/libexec/pbs_postinstall \
