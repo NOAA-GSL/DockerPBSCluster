@@ -31,7 +31,6 @@ RUN apt-get update -y && apt-get install -y \
     python3-dev \
     libpq-dev \
     postgresql-16 \
-    postgresql-16-contrib \
     libical-dev \
     libedit-dev \
     libhwloc-dev \

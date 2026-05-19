@@ -116,7 +116,7 @@ jobs:
         name: Run a PBS job
         run: |
           docker exec pbs-frontend bash -lc "echo hostname | qsub"
-          sleep 15
+          sleep 5
           docker exec pbs-server bash -lc "qstat -x"
 
       -
