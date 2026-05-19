@@ -4,6 +4,16 @@ FROM ${UBUNTU_BASE}
 ARG OPENPBS_VERSION=23.06.06
 ARG DEBIAN_FRONTEND=noninteractive
 
+# Pin PostgreSQL 16: ubuntu 26.04 ships pg18, which OpenPBS 23.x does not
+# support.  Add the official PGDG repo so we can install a compatible version.
+RUN apt-get update -y && apt-get install -y wget ca-certificates gnupg \
+ && install -d /usr/share/keyrings \
+ && wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] https://apt.postgresql.org/pub/repos/apt resolute-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list \
+ && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies
 RUN apt-get update -y && apt-get install -y \
     gcc \
@@ -20,8 +30,8 @@ RUN apt-get update -y && apt-get install -y \
     python3 \
     python3-dev \
     libpq-dev \
-    postgresql \
-    postgresql-contrib \
+    postgresql-16 \
+    postgresql-16-contrib \
     libical-dev \
     libedit-dev \
     libhwloc-dev \
@@ -60,10 +70,11 @@ RUN useradd -r -m -d /var/lib/pbsdata -s /bin/sh -G postgres pbsdata
 # Fix the db_user file: pbs_postinstall writes "postgres" but we use pbsdata
 RUN echo -n pbsdata > /var/spool/pbs/server_priv/db_user
 
-# Symlink PostgreSQL server binaries into /usr/bin so pbs_db_utility can find them via PATH under sudo
-RUN pg_bindir=$(pg_config --bindir) && \
-    for bin in initdb pg_ctl createdb psql pg_config; do \
-        ln -sf ${pg_bindir}/${bin} /usr/bin/${bin}; \
+# Symlink PostgreSQL 16 server binaries into /usr/bin so pbs_db_utility can
+# find them via PATH under sudo.  Hardcode the pg16 path so this is not
+# affected by whichever pg_config libpq-dev exposes.
+RUN for bin in initdb pg_ctl createdb psql pg_config; do \
+        ln -sf /usr/lib/postgresql/16/bin/${bin} /usr/bin/${bin}; \
     done
 
 # Configure PBS as server
