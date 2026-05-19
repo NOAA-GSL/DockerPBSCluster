@@ -1,6 +1,8 @@
-# Docker PBS Cluster
+[![Docker PBS](https://github.com/NOAA-GSL/DockerPBSCluster/actions/workflows/docker.yml/badge.svg)](https://github.com/NOAA-GSL/DockerPBSCluster/actions/workflows/docker.yml)
 
-A containerized OpenPBS cluster for CI testing of software that requires a working batch system.
+# PBS Cluster in Ubuntu Docker Images Using Docker Compose
+
+This is an installation of an OpenPBS cluster inside Docker.  This is useful for testing of software that requires a working batch system in environments (like CI or your laptop) that do not have one.
 
 ## Architecture
 
@@ -41,6 +43,7 @@ docker compose down
 ## Configuration
 
 - **OpenPBS Version**: Set via `OPENPBS_VERSION` build arg in Dockerfiles (default: `23.06.06`)
+- **Ubuntu base image**: Pinned by digest for reproducibility; updated weekly by the `Refresh Ubuntu Base Digest` workflow
 - **Queue**: A default execution queue `workq` is created automatically
 - **Nodes**: 3 compute nodes are registered with the server at startup
 - **Authentication**: PBS built-in auth (no external auth daemon like munge needed)
@@ -59,7 +62,9 @@ docker compose down
 
 ## Notes
 
+Pinned Ubuntu base image: ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64
+
 - OpenPBS is the open-source community edition of PBS Professional
 - The server container requires PostgreSQL for its datastore
 - Compute nodes (`pbs_mom`) register with the server automatically
-- All containers share the same `admin` user with passwordless sudo
+- All containers share the same `admin` user

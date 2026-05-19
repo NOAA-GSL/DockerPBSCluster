@@ -2,6 +2,9 @@
 
 export PATH=/opt/pbs/bin:/opt/pbs/sbin:$PATH
 
+# Regenerate SSH host keys (keys are not baked into the image)
+sudo ssh-keygen -A
+
 # Start SSH
 sudo service ssh start
 
