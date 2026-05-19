@@ -15,9 +15,66 @@ env:
 
 jobs:
 
-  docker_compose_test:
-    name: Docker Compose Test
+  docker_compose_test_amd64:
+    name: Docker Compose Test (amd64)
     runs-on: ubuntu2204-4c-16g-150ssd
+
+    steps:
+      -
+        name: Checkout Repository
+        uses: actions/checkout@v4
+      -
+        name: Build and start containers
+        run: docker compose -f docker-compose.yml up --build -d
+
+      -
+        name: Check cluster logs
+        run: docker compose -f docker-compose.yml logs
+
+      -
+        name: Check status of the cluster containers
+        run: docker compose -f docker-compose.yml ps
+
+      -
+        name: Wait for PBS cluster to be ready
+        run: |
+          echo "Waiting for PBS nodes to become free..."
+          for i in $(seq 1 60); do
+            free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free'" 2>/dev/null || echo 0)
+            echo "Attempt $i: $free nodes free"
+            [ "$free" -ge 3 ] && echo "All 3 nodes ready" && break
+            sleep 5
+          done
+
+      -
+        name: Check status of PBS server
+        run: docker exec pbs-server bash -lc "qstat -Bf"
+
+      -
+        name: Check status of PBS nodes
+        run: docker exec pbs-server bash -lc "pbsnodes -a"
+
+      -
+        name: Run a PBS job
+        run: |
+          docker exec pbs-frontend bash -lc "echo hostname | qsub"
+          sleep 15
+          docker exec pbs-server bash -lc "qstat -x"
+
+      -
+        name: Test SSH access to PBS compute nodes
+        run: |
+          docker exec pbs-frontend bash -lc "timeout 5s ssh pbsnode1 hostname"
+          docker exec pbs-frontend bash -lc "timeout 5s ssh pbsnode2 hostname"
+          docker exec pbs-frontend bash -lc "timeout 5s ssh pbsnode3 hostname"
+
+      -
+        name: Shut down PBS cluster containers
+        run: docker compose -f docker-compose.yml down
+
+  docker_compose_test_arm64:
+    name: Docker Compose Test (arm64)
+    runs-on: ubuntu-24.04-arm
 
     steps:
       -
@@ -89,7 +146,8 @@ jobs:
   build-server-arm64:
     runs-on: ubuntu-24.04-arm
     needs:
-      - docker_compose_test
+      - docker_compose_test_amd64
+      - docker_compose_test_arm64
       - resolve_versions
     timeout-minutes: 360
     permissions:
@@ -160,7 +218,8 @@ jobs:
   build-server-amd64:
     runs-on: ubuntu-latest
     needs:
-      - docker_compose_test
+      - docker_compose_test_amd64
+      - docker_compose_test_arm64
       - resolve_versions
     timeout-minutes: 360
     permissions:
@@ -287,7 +346,8 @@ jobs:
   build-mom-arm64:
     runs-on: ubuntu-24.04-arm
     needs:
-      - docker_compose_test
+      - docker_compose_test_amd64
+      - docker_compose_test_arm64
       - resolve_versions
     timeout-minutes: 360
     permissions:
@@ -358,7 +418,8 @@ jobs:
   build-mom-amd64:
     runs-on: ubuntu-latest
     needs:
-      - docker_compose_test
+      - docker_compose_test_amd64
+      - docker_compose_test_arm64
       - resolve_versions
     timeout-minutes: 360
     permissions:
@@ -485,7 +546,8 @@ jobs:
   build-frontend-arm64:
     runs-on: ubuntu-24.04-arm
     needs:
-      - docker_compose_test
+      - docker_compose_test_amd64
+      - docker_compose_test_arm64
       - resolve_versions
     timeout-minutes: 360
     permissions:
@@ -556,7 +618,8 @@ jobs:
   build-frontend-amd64:
     runs-on: ubuntu-latest
     needs:
-      - docker_compose_test
+      - docker_compose_test_amd64
+      - docker_compose_test_arm64
       - resolve_versions
     timeout-minutes: 360
     permissions:
