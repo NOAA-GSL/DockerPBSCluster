@@ -1,0 +1,88 @@
+name: PackageCleanup
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  cleanup-packages:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      -
+        name: Remove untagged versions of dockerpbscluster/pbs-frontend
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/pbs-frontend'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/pbs-server
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/pbs-server'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/pbs-mom
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/pbs-mom'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/frontend-cache-amd64
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/frontend-cache-amd64'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/frontend-cache-arm64
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/frontend-cache-arm64'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/server-cache-amd64
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/server-cache-amd64'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/server-cache-arm64
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/server-cache-arm64'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/mom-cache-amd64
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/mom-cache-amd64'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
+      -
+        name: Remove untagged versions of dockerpbscluster/mom-cache-arm64
+        uses: actions/delete-package-versions@v5
+        with: 
+          package-name: 'dockerpbscluster/mom-cache-arm64'
+          package-type: 'container'
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
