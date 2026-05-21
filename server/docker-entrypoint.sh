@@ -2,6 +2,14 @@
 
 export PATH=/opt/pbs/bin:/opt/pbs/sbin:$PATH
 
+
+# Wait for PostgreSQL to be ready
+echo "Waiting for PostgreSQL to be ready..."
+for i in $(seq 1 30); do
+    pg_isready -U pbsdata -h /var/run/postgresql -p 15007 && break
+    sleep 1
+done
+
 # Initialize the PBS PostgreSQL datastore
 echo "Initializing PBS datastore..."
 sudo /opt/pbs/libexec/pbs_db_utility install_db
