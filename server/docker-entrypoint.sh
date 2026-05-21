@@ -64,10 +64,4 @@ sudo ssh-keygen -A
 # Start SSH
 sudo service ssh start
 
-# Generate SSH keys for admin user
-if [ ! -f /home/admin/.ssh/id_rsa ]; then
-    ssh-keygen -t rsa -f /home/admin/.ssh/id_rsa -N ""
-    cp /home/admin/.ssh/id_rsa.pub /home/admin/.ssh/authorized_keys
-fi
-
 tail -f /dev/null
