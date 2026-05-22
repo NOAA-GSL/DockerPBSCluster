@@ -59,28 +59,38 @@ trap 'on_error $LINENO' ERR
 sudo install -d -o postgres -g postgres -m 2775 /var/run/postgresql
 
 # Initialize the PBS PostgreSQL datastore.
-# install_db has a known race condition between starting postgres and running
-# createdb: pbs_dataservice's status poll can return success before postgres
-# has actually bound its unix socket, which causes createdb to fail. Retry a
-# few times. If it still fails, continue anyway: `pbs_server -t create` is
-# able to bootstrap the datastore from scratch and is the source of truth
-# for whether startup succeeded.
+# install_db has a known race condition: pbs_dataservice considers postgres
+# "started" as soon as the process is up, but createdb can hit "the database
+# system is starting up" if it connects before postgres finishes WAL recovery.
+# We retry the whole install_db invocation; each retry runs initdb from
+# scratch, so the race window is re-rolled. If we still fail after a few
+# attempts, we continue anyway: `pbs_server -t create` is able to bootstrap
+# the datastore itself and is the real source of truth for startup success.
+#
+# Calling install_db inside an `if` (or via `|| true`) is essential: the
+# `trap ... ERR` above fires on *any* simple-command non-zero exit, even
+# under `set +e`. Only the conditional context suppresses it.
 echo "Initializing PBS datastore (pbs_db_utility install_db)..."
 install_db_rc=1
-for attempt in 1 2 3; do
-    set +e
-    sudo /opt/pbs/libexec/pbs_db_utility install_db
-    install_db_rc=$?
-    set -e
-    if [ "$install_db_rc" -eq 0 ]; then
+for attempt in 1 2 3 4 5; do
+    # Make sure no stale data-service state from a failed previous attempt is
+    # left around: pbs_dataservice's "cleanup" doesn't always tear down the
+    # pbs_ds_monitor process, which can confuse the next attempt.
+    sudo pkill -9 -f 'pbs_ds_monitor' 2>/dev/null || true
+    sudo pkill -9 -f 'postgres.*-D /var/spool/pbs/datastore' 2>/dev/null || true
+    sudo rm -rf /var/spool/pbs/datastore 2>/dev/null || true
+
+    if sudo /opt/pbs/libexec/pbs_db_utility install_db; then
+        install_db_rc=0
         echo "install_db succeeded on attempt $attempt."
         break
     fi
-    echo "install_db attempt $attempt failed (rc=$install_db_rc); retrying in 5s..."
-    sleep 5
+    install_db_rc=$?
+    echo "install_db attempt $attempt failed (rc=$install_db_rc); retrying in 10s..."
+    sleep 10
 done
 if [ "$install_db_rc" -ne 0 ]; then
-    echo "WARN: install_db failed after 3 attempts; will rely on pbs_server -t create to bootstrap."
+    echo "WARN: install_db failed after 5 attempts; will rely on pbs_server -t create to bootstrap."
 fi
 
 # Start pbs_comm first (pbs_server requires it)
@@ -112,20 +122,20 @@ echo "Starting pbs_sched..."
 sudo /opt/pbs/sbin/pbs_sched
 
 # Configure server. These are idempotent-on-restart; some commands intentionally
-# error if a queue/node/hook already exists, so don't trip the ERR trap.
-set +e
-sudo /opt/pbs/bin/qmgr -c "create queue workq queue_type=execution" 2>/dev/null
-sudo /opt/pbs/bin/qmgr -c "set queue workq enabled = True"
-sudo /opt/pbs/bin/qmgr -c "set queue workq started = True"
-sudo /opt/pbs/bin/qmgr -c "set server default_queue = workq"
-sudo /opt/pbs/bin/qmgr -c "set server scheduling = True"
-sudo /opt/pbs/bin/qmgr -c "set server flatuid = True"
-sudo /opt/pbs/bin/qmgr -c "set server job_history_enable = True"
+# error if a queue/node/hook already exists. The ERR trap fires on *any*
+# non-zero exit (not gated by `set -e`), so each command must be `|| true`'d
+# rather than relying on set +e.
+sudo /opt/pbs/bin/qmgr -c "create queue workq queue_type=execution" 2>/dev/null || true
+sudo /opt/pbs/bin/qmgr -c "set queue workq enabled = True" || true
+sudo /opt/pbs/bin/qmgr -c "set queue workq started = True" || true
+sudo /opt/pbs/bin/qmgr -c "set server default_queue = workq" || true
+sudo /opt/pbs/bin/qmgr -c "set server scheduling = True" || true
+sudo /opt/pbs/bin/qmgr -c "set server flatuid = True" || true
+sudo /opt/pbs/bin/qmgr -c "set server job_history_enable = True" || true
 
-sudo /opt/pbs/bin/qmgr -c "create node pbsnode1" 2>/dev/null
-sudo /opt/pbs/bin/qmgr -c "create node pbsnode2" 2>/dev/null
-sudo /opt/pbs/bin/qmgr -c "create node pbsnode3" 2>/dev/null
-set -e
+sudo /opt/pbs/bin/qmgr -c "create node pbsnode1" 2>/dev/null || true
+sudo /opt/pbs/bin/qmgr -c "create node pbsnode2" 2>/dev/null || true
+sudo /opt/pbs/bin/qmgr -c "create node pbsnode3" 2>/dev/null || true
 
 # Create a queuejob hook that defaults output/error paths to the submission
 # directory (PBS_O_WORKDIR) instead of $HOME on the submission host.
@@ -144,11 +154,9 @@ except Exception as ex:
     pbs.logmsg(pbs.LOG_DEBUG, 'default_output_dir: ' + str(ex))
 e.accept()
 PYEOF
-set +e
-sudo /opt/pbs/bin/qmgr -c "create hook default_output_dir" 2>/dev/null
-sudo /opt/pbs/bin/qmgr -c "set hook default_output_dir event = queuejob"
-sudo /opt/pbs/bin/qmgr -c "import hook default_output_dir application/x-python default /tmp/default_output_dir.py"
-set -e
+sudo /opt/pbs/bin/qmgr -c "create hook default_output_dir" 2>/dev/null || true
+sudo /opt/pbs/bin/qmgr -c "set hook default_output_dir event = queuejob" || true
+sudo /opt/pbs/bin/qmgr -c "import hook default_output_dir application/x-python default /tmp/default_output_dir.py" || true
 
 # Regenerate SSH host keys (keys are not baked into the image)
 sudo ssh-keygen -A
