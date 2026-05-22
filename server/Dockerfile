@@ -73,9 +73,9 @@ RUN grep -q '^	tries=5$' /opt/pbs/libexec/pbs_db_utility \
  && grep -q '\${server_ctl} status > /dev/null 2>&1' /opt/pbs/libexec/pbs_db_utility \
  && sed -i \
         -e '0,/^	tries=5$/{s||	tries=30|}' \
-        -e 's|\${server_ctl} status > /dev/null 2>&1|\${bin_dir}/pg_isready -h /var/run/postgresql -p \${port} -q > /dev/null 2>&1|' \
+        -e 's|\${server_ctl} status > /dev/null 2>&1|\${bin_dir}/pg_isready -h /var/run/postgresql -p \${port} -q > /dev/null 2>\&1|' \
         /opt/pbs/libexec/pbs_db_utility \
- && grep -q 'pg_isready' /opt/pbs/libexec/pbs_db_utility \
+ && grep -q 'pg_isready -h /var/run/postgresql -p \${port} -q > /dev/null 2>&1' /opt/pbs/libexec/pbs_db_utility \
  && grep -q '^	tries=30$' /opt/pbs/libexec/pbs_db_utility
 
 # Create pbsdata system user required by PBS dataservice (normally done by package manager)
