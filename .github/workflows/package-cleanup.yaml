@@ -13,76 +13,36 @@ jobs:
     permissions:
       packages: write
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        container: [frontend, server, mom]     
     steps:
       -
-        name: Remove untagged versions of dockerpbscluster/pbs-frontend
+        name: Remove untagged versions of dockerpbscluster/pbs-${{ matrix.container }}
         uses: actions/delete-package-versions@v5
         with: 
-          package-name: 'dockerpbscluster/pbs-frontend'
+          package-name: 'dockerpbscluster/pbs-${{ matrix.container }}'
           package-type: 'container'
           min-versions-to-keep: 0
           delete-only-untagged-versions: 'true'
+  cleanup-caches:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        container: [frontend, server, mom]
+        ubuntu: ['24.04', '26.04']
+        arch: [amd64, arm64]
+    steps:
       -
-        name: Remove untagged versions of dockerpbscluster/pbs-server
+        name: Remove untagged versions of dockerpbscluster/${{ matrix.container }}-cache-${{ matrix.ubuntu }}-{{ matrix.arch }}
         uses: actions/delete-package-versions@v5
         with: 
-          package-name: 'dockerpbscluster/pbs-server'
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
-      -
-        name: Remove untagged versions of dockerpbscluster/pbs-mom
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'dockerpbscluster/pbs-mom'
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
-      -
-        name: Remove untagged versions of dockerpbscluster/frontend-cache-amd64
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'dockerpbscluster/frontend-cache-amd64'
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
-      -
-        name: Remove untagged versions of dockerpbscluster/frontend-cache-arm64
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'dockerpbscluster/frontend-cache-arm64'
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
-      -
-        name: Remove untagged versions of dockerpbscluster/server-cache-amd64
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'dockerpbscluster/server-cache-amd64'
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
-      -
-        name: Remove untagged versions of dockerpbscluster/server-cache-arm64
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'dockerpbscluster/server-cache-arm64'
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
-      -
-        name: Remove untagged versions of dockerpbscluster/mom-cache-amd64
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'dockerpbscluster/mom-cache-amd64'
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
-      -
-        name: Remove untagged versions of dockerpbscluster/mom-cache-arm64
-        uses: actions/delete-package-versions@v5
-        with: 
-          package-name: 'dockerpbscluster/mom-cache-arm64'
+          package-name: 'dockerpbscluster/${{ matrix.container }}-cache-${{ matrix.ubuntu }}-${{ matrix.arch }}'
           package-type: 'container'
           min-versions-to-keep: 0
           delete-only-untagged-versions: 'true'
