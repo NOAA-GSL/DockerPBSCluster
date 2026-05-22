@@ -1,47 +1,48 @@
-ARG UBUNTU_BASE=ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64
+ARG UBUNTU_BASE=ubuntu:26.04
 FROM ${UBUNTU_BASE}
 
 ARG OPENPBS_VERSION=23.06.06
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Pin PostgreSQL 16: ubuntu 26.04 ships pg18, which OpenPBS 23.x does not
-# support.  Add the official PGDG repo so we can install a compatible version.
-RUN apt-get update -y && apt-get install -y wget ca-certificates gnupg \
+
+# Add the official PGDG repo for the detected Ubuntu codename and always install PostgreSQL 15
+RUN apt-get update -y && apt-get install -y wget ca-certificates gnupg lsb-release \
  && install -d /usr/share/keyrings \
  && wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-    | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
- && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] https://apt.postgresql.org/pub/repos/apt resolute-pgdg main" \
-    > /etc/apt/sources.list.d/pgdg.list \
+      | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
+ && UBUNTU_CODENAME=$(lsb_release -cs) \
+ && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] https://apt.postgresql.org/pub/repos/apt $UBUNTU_CODENAME-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
  && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-RUN apt-get update -y && apt-get install -y \
-    gcc \
-    g++ \
-    make \
-    autoconf \
-    automake \
-    libtool \
-    git \
-    wget \
-    vim \
-    sudo \
-    openssh-server \
-    python3 \
-    python3-dev \
-    libpq-dev \
-    postgresql-16 \
-    libical-dev \
-    libedit-dev \
-    libhwloc-dev \
-    libssl-dev \
-    swig \
-    pkg-config \
-    expat \
-    libexpat1-dev \
-    tcl-dev \
-    tk-dev \
-    libxt-dev \
+# Install dependencies, always using PostgreSQL 15
+RUN apt-get update -y \
+ && apt-get install -y \
+         gcc \
+         g++ \
+         make \
+         autoconf \
+         automake \
+         libtool \
+         git \
+         wget \
+         vim \
+         sudo \
+         openssh-server \
+         python3 \
+         python3-dev \
+         libpq-dev \
+         postgresql-15 \
+         libical-dev \
+         libedit-dev \
+         libhwloc-dev \
+         libssl-dev \
+         swig \
+         pkg-config \
+         expat \
+         libexpat1-dev \
+         tcl-dev \
+         tk-dev \
+         libxt-dev \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && rm -f /etc/ssl/private/ssl-cert-snakeoil.key \
@@ -61,18 +62,61 @@ RUN git clone --branch v${OPENPBS_VERSION} --depth 1 https://github.com/openpbs/
  && /opt/pbs/libexec/pbs_postinstall \
  && rm -rf /tmp/openpbs
 
+# Fix a race in pbs_db_utility install_db.
+#
+# Upstream's pbs_install_db() starts the data service and then waits for it
+# to come up with this loop (verbatim from v23.06.06 src/lib/Libdb/pgsql/pbs_db_utility):
+#
+#     ${server_ctl} start
+#     ...
+#     tries=5
+#     while [ $tries -ge 0 ]
+#     do
+#         ${server_ctl} status > /dev/null 2>&1   # <-- only checks "process exists"
+#         ret=$?
+#         if [ $ret -eq 0 ]; then break; fi
+#         tries=$((tries-1))
+#         sleep 2
+#     done
+#     # ... then runs createdb immediately ...
+#
+# `pbs_dataservice status` reports success as soon as the postgres process
+# is up, but postgres may still be in startup (WAL recovery, listen-socket
+# bind) and refusing new connections. createdb then fails with:
+#   FATAL:  the database system is starting up
+# followed by `Error creating PBS datastore` and install_db exits.
+#
+# This race was timing-sensitive: it manifested deterministically on
+# Ubuntu 24.04 / arm64 in CI but went unnoticed on the other three platform
+# combos. We close it by patching two lines in the installed script:
+#   - tries=5  -> tries=30   (bump the wait budget from ~12s to ~62s)
+#   - ${server_ctl} status   -> pg_isready, which only returns 0 when
+#                               postgres is actually accepting connections
+#
+# The grep -q calls before/after sed assert that the anchor lines exist
+# and that the substitution produced the expected result, so a future
+# upstream change or a botched sed will fail the build loudly instead of
+# silently producing a broken image.
+RUN grep -q '^	tries=5$' /opt/pbs/libexec/pbs_db_utility \
+ && grep -q '\${server_ctl} status > /dev/null 2>&1' /opt/pbs/libexec/pbs_db_utility \
+ && sed -i \
+        -e '0,/^	tries=5$/{s||	tries=30|}' \
+        -e 's|\${server_ctl} status > /dev/null 2>&1|\${bin_dir}/pg_isready -h /var/run/postgresql -p \${port} -q > /dev/null 2>\&1|' \
+        /opt/pbs/libexec/pbs_db_utility \
+ && grep -q 'pg_isready -h /var/run/postgresql -p \${port} -q > /dev/null 2>&1' /opt/pbs/libexec/pbs_db_utility \
+ && grep -q '^	tries=30$' /opt/pbs/libexec/pbs_db_utility
+
 # Create pbsdata system user required by PBS dataservice (normally done by package manager)
 RUN useradd -r -m -d /var/lib/pbsdata -s /bin/sh -G postgres pbsdata
 
 # Fix the db_user file: pbs_postinstall writes "postgres" but we use pbsdata
 RUN echo -n pbsdata > /var/spool/pbs/server_priv/db_user
 
-# Symlink PostgreSQL 16 server binaries into /usr/bin so pbs_db_utility can
-# find them via PATH under sudo.  Hardcode the pg16 path so this is not
-# affected by whichever pg_config libpq-dev exposes.
+# Symlink PostgreSQL 15 server binaries into /usr/bin so pbs_db_utility can
+# find them via PATH under sudo.
 RUN for bin in initdb pg_ctl createdb psql pg_config; do \
-        ln -sf /usr/lib/postgresql/16/bin/${bin} /usr/bin/${bin}; \
-    done
+            ln -sf /usr/lib/postgresql/15/bin/${bin} /usr/bin/${bin}; \
+      done
 
 # Configure PBS as server
 RUN echo "PBS_EXEC=/opt/pbs"           >  /etc/pbs.conf \
@@ -106,10 +150,6 @@ RUN chmod 4755 /opt/pbs/sbin/pbs_iff \
 
 COPY docker-entrypoint.sh /opt/pbs/docker-entrypoint.sh
 RUN chmod +x /opt/pbs/docker-entrypoint.sh
-
-COPY ssh /home/admin/.ssh
-RUN chown -R admin:admin /home/admin/.ssh \
- && chmod -R 700 /home/admin/.ssh
 
 WORKDIR /home/admin
 

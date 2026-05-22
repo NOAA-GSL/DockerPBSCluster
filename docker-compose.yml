@@ -1,76 +1,85 @@
+x-node-common: &node-common
+  image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom:${IMAGE_TAG}
+  shm_size: '4g'
+  user: admin
+  volumes:
+    - shared-vol:/home/admin
+  depends_on:
+    pbsserver:
+      condition: service_started
+    pbsfrontend:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "ssh", "-o", "StrictHostKeyChecking=no", "admin@localhost", "hostname"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
 services:
-  pbsserver:
-        build:
-          context: ./server
-          dockerfile: Dockerfile
-        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-server:latest
-        container_name: pbs-server
-        shm_size: '4g'
-        hostname: pbsserver
-        user: admin
-        volumes:
-                - shared-vol:/home/admin
-        ports:
-                - 15001:15001
-                - 15003:15003
-                - 17001:17001
   pbsfrontend:
-        build:
-          context: ./frontend
-          dockerfile: Dockerfile
-        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-frontend:latest
-        container_name: pbs-frontend
-        shm_size: '4g'
-        hostname: pbsfrontend
-        user: admin
-        volumes:
-                - shared-vol:/home/admin:nocopy
-        links:
-                - pbsserver
+    build:
+      context: ./frontend
+      args:
+        UBUNTU_BASE: ${UBUNTU_BASE}
+    image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-frontend:${IMAGE_TAG}
+    container_name: pbs-frontend
+    shm_size: '4g'
+    hostname: pbsfrontend
+    user: admin
+    volumes:
+      - shared-vol:/home/admin
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ssh-ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  pbsserver:
+    build:
+      context: ./server
+      args:
+        UBUNTU_BASE: ${UBUNTU_BASE}
+    image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-server:${IMAGE_TAG}
+    container_name: pbs-server
+    shm_size: '4g'
+    hostname: pbsserver
+    user: admin
+    volumes:
+      - shared-vol:/home/admin
+    ports:
+      - 15001:15001
+      - 15003:15003
+      - 17001:17001
+    depends_on:
+      pbsfrontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/pbs-server-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
   pbsnode1:
-        build:
-          context: ./mom
-          dockerfile: Dockerfile
-        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom:latest
-        container_name: pbs-node1
-        shm_size: '4g'
-        hostname: pbsnode1
-        user: admin
-        volumes:
-                - shared-vol:/home/admin:nocopy
-        environment:
-                - PBS_NODENAME=pbsnode1
-        links:
-                - pbsserver
+    <<: *node-common
+    build:
+      context: ./mom
+      args:
+        UBUNTU_BASE: ${UBUNTU_BASE}
+    container_name: pbs-node1
+    hostname: pbsnode1
+    environment:
+      - PBS_NODENAME=pbsnode1
   pbsnode2:
-        build:
-          context: ./mom
-          dockerfile: Dockerfile
-        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom:latest
-        container_name: pbs-node2
-        shm_size: '4g'
-        hostname: pbsnode2
-        user: admin
-        volumes:
-                - shared-vol:/home/admin:nocopy
-        environment:
-                - PBS_NODENAME=pbsnode2
-        links:
-                - pbsserver
+    <<: *node-common
+    container_name: pbs-node2
+    hostname: pbsnode2
+    environment:
+      - PBS_NODENAME=pbsnode2
   pbsnode3:
-        build:
-          context: ./mom
-          dockerfile: Dockerfile
-        image: ghcr.io/noaa-gsl/dockerpbscluster/pbs-mom:latest
-        container_name: pbs-node3
-        shm_size: '4g'
-        hostname: pbsnode3
-        user: admin
-        volumes:
-                - shared-vol:/home/admin:nocopy
-        environment:
-                - PBS_NODENAME=pbsnode3
-        links:
-                - pbsserver
+    <<: *node-common
+    container_name: pbs-node3
+    hostname: pbsnode3
+    environment:
+      - PBS_NODENAME=pbsnode3
 volumes:
-        shared-vol:
+  shared-vol:

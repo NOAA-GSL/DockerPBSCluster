@@ -1,4 +1,4 @@
-ARG UBUNTU_BASE=ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64
+ARG UBUNTU_BASE=ubuntu:26.04
 FROM ${UBUNTU_BASE}
 
 ARG OPENPBS_VERSION=23.06.06
@@ -81,10 +81,6 @@ RUN chmod 4755 /opt/pbs/sbin/pbs_iff \
 
 COPY docker-entrypoint.sh /opt/pbs/docker-entrypoint.sh
 RUN chmod +x /opt/pbs/docker-entrypoint.sh
-
-COPY ssh /home/admin/.ssh
-RUN chown -R admin:admin /home/admin/.ssh \
- && chmod -R 700 /home/admin/.ssh
 
 WORKDIR /home/admin
 
