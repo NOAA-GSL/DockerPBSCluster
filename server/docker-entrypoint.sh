@@ -7,7 +7,7 @@ export PATH=/opt/pbs/bin:/opt/pbs/sbin:$PATH
 
 dump_diagnostics() {
     echo "================== PBS SERVER FAILURE DIAGNOSTICS =================="
-    echo "--- uname / lsb-release ---"
+    echo "--- uname / os-release ---"
     uname -a || true
     cat /etc/os-release 2>/dev/null || true
     echo "--- /etc/pbs.conf ---"
@@ -18,6 +18,10 @@ dump_diagnostics() {
     sudo pgrep -af 'postgres|pbs_' 2>&1 || echo "(none)"
     echo "--- listening sockets ---"
     sudo ss -lntp 2>&1 || sudo netstat -lntp 2>&1 || true
+    echo "--- /var/run/postgresql ---"
+    sudo ls -la /var/run/postgresql/ 2>&1 || echo "(missing)"
+    echo "--- /run ---"
+    sudo ls -la /run/ 2>&1 || true
     echo "--- /var/spool/pbs ---"
     sudo ls -la /var/spool/pbs/ 2>&1 || true
     echo "--- /var/spool/pbs/server_priv ---"
@@ -25,7 +29,7 @@ dump_diagnostics() {
     echo "--- /var/spool/pbs/server_priv/db_* ---"
     sudo sh -c 'for f in /var/spool/pbs/server_priv/db_*; do echo "=== $f ==="; cat "$f" 2>&1 || true; done' || true
     echo "--- /var/spool/pbs/datastore ---"
-    sudo ls -la /var/spool/pbs/datastore/ 2>&1 || true
+    sudo ls -la /var/spool/pbs/datastore/ 2>&1 || echo "(missing)"
     echo "--- PBS data service log (pg_log) ---"
     sudo sh -c 'tail -n 200 /var/spool/pbs/datastore/pg_log/* 2>&1' || echo "(no pg_log)"
     echo "--- PBS server_logs ---"
@@ -42,31 +46,42 @@ on_error() {
     echo "ERROR: docker-entrypoint.sh failed (exit code $rc) at line ${1:-?}"
     dump_diagnostics
     echo "Keeping container alive for inspection (docker exec / tmate)."
-    # Don't exit -- keep PID 1 alive so the container doesn't restart and lose state.
     exec tail -f /dev/null
 }
 trap 'on_error $LINENO' ERR
 
-# Initialize the PBS PostgreSQL datastore.
-# This is responsible for initdb, creating the pbsdata role+db, applying the
-# schema, and starting the PBS data service (postgres on port 15007).
-echo "Initializing PBS datastore (pbs_db_utility install_db)..."
-sudo /opt/pbs/libexec/pbs_db_utility install_db
-echo "install_db returned $?"
+# Ensure the PostgreSQL runtime socket directory exists with the right perms.
+# In Docker there is no systemd-tmpfiles to create /run/postgresql, and PBS's
+# data service uses /var/run/postgresql as its unix socket dir. Without this,
+# `pg_db_utility install_db` can fail with:
+#   createdb: connection to server on socket "/var/run/postgresql/.s.PGSQL.15007"
+#   failed: No such file or directory
+sudo install -d -o postgres -g postgres -m 2775 /var/run/postgresql
 
-# Verify the PBS data service is actually accepting connections.
-echo "Waiting for PBS data service on port 15007..."
-for i in $(seq 1 60); do
-    if pg_isready -U pbsdata -h /var/run/postgresql -p 15007 >/dev/null 2>&1; then
-        echo "PBS data service is ready (after ${i}s)."
+# Initialize the PBS PostgreSQL datastore.
+# install_db has a known race condition between starting postgres and running
+# createdb: pbs_dataservice's status poll can return success before postgres
+# has actually bound its unix socket, which causes createdb to fail. Retry a
+# few times. If it still fails, continue anyway: `pbs_server -t create` is
+# able to bootstrap the datastore from scratch and is the source of truth
+# for whether startup succeeded.
+echo "Initializing PBS datastore (pbs_db_utility install_db)..."
+install_db_rc=1
+for attempt in 1 2 3; do
+    set +e
+    sudo /opt/pbs/libexec/pbs_db_utility install_db
+    install_db_rc=$?
+    set -e
+    if [ "$install_db_rc" -eq 0 ]; then
+        echo "install_db succeeded on attempt $attempt."
         break
     fi
-    sleep 1
-    if [ "$i" -eq 60 ]; then
-        echo "ERROR: PBS data service did not come up within 60s after install_db."
-        exit 1
-    fi
+    echo "install_db attempt $attempt failed (rc=$install_db_rc); retrying in 5s..."
+    sleep 5
 done
+if [ "$install_db_rc" -ne 0 ]; then
+    echo "WARN: install_db failed after 3 attempts; will rely on pbs_server -t create to bootstrap."
+fi
 
 # Start pbs_comm first (pbs_server requires it)
 echo "Starting pbs_comm..."
@@ -76,7 +91,8 @@ sudo /opt/pbs/sbin/pbs_comm
 echo "Starting pbs_server -t create..."
 sudo /opt/pbs/sbin/pbs_server -t create
 
-# Verify pbs_server is actually alive and responding
+# Verify pbs_server is actually alive and responding. This is the real gate:
+# if pbs_server can't talk to its datastore, qstat will keep failing.
 echo "Waiting for pbs_server to accept requests..."
 for i in $(seq 1 60); do
     if sudo /opt/pbs/bin/qstat -Bf >/dev/null 2>&1; then
@@ -95,8 +111,8 @@ done
 echo "Starting pbs_sched..."
 sudo /opt/pbs/sbin/pbs_sched
 
-# Configure server. These are idempotent-on-restart; some commands are
-# expected to "fail" (e.g. queue already exists), so don't trip the ERR trap.
+# Configure server. These are idempotent-on-restart; some commands intentionally
+# error if a queue/node/hook already exists, so don't trip the ERR trap.
 set +e
 sudo /opt/pbs/bin/qmgr -c "create queue workq queue_type=execution" 2>/dev/null
 sudo /opt/pbs/bin/qmgr -c "set queue workq enabled = True"
