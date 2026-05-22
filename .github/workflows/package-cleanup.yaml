@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        container: [frontend, master, node]
+        container: [frontend, server, mom]
         ubuntu: ['24.04', '26.04']
         arch: [amd64, arm64]
     steps:
