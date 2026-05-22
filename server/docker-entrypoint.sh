@@ -76,8 +76,10 @@ for attempt in 1 2 3 4 5; do
     # Make sure no stale data-service state from a failed previous attempt is
     # left around: pbs_dataservice's "cleanup" doesn't always tear down the
     # pbs_ds_monitor process, which can confuse the next attempt.
-    sudo pkill -9 -f 'pbs_ds_monitor' 2>/dev/null || true
-    sudo pkill -9 -f 'postgres.*-D /var/spool/pbs/datastore' 2>/dev/null || true
+    # Match by process name only (not full cmdline) so pkill doesn't match
+    # its own sudo wrapper.
+    sudo pkill -9 -x pbs_ds_monitor 2>/dev/null || true
+    sudo pkill -9 -x postgres 2>/dev/null || true
     sudo rm -rf /var/spool/pbs/datastore 2>/dev/null || true
 
     if sudo /opt/pbs/libexec/pbs_db_utility install_db; then
