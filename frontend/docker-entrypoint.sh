@@ -2,8 +2,11 @@
 
 export PATH=/opt/pbs/bin:/opt/pbs/sbin:$PATH
 
-# Regenerate SSH host keys (keys are not baked into the image)
-sudo ssh-keygen -A
+
+# Regenerate SSH host keys only if missing (prevents SSH warnings on restart)
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+    sudo ssh-keygen -A
+fi
 
 # Start SSH
 sudo service ssh start
