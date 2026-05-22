@@ -44,7 +44,8 @@ jobs:
         run: |
           echo "Waiting for PBS nodes to become free..."
           for i in $(seq 1 60); do
-            free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free'" 2>/dev/null || echo 0)
+            # free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free'" 2>/dev/null || echo 0)
+            free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free' || echo 0" 2>/dev/null)
             echo "Attempt $i: $free nodes free"
             [ "$free" -ge 3 ] && echo "All 3 nodes ready" && break
             sleep 5
@@ -75,6 +76,14 @@ jobs:
       -
         name: Shut down PBS cluster containers
         run: docker compose -f docker-compose.yml down
+      -
+        name: Debug session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 60
+        with:
+          limit-access-to-actor: true
+
 
   docker_compose_test_arm64:
     name: Compose Test (ubuntu-${{ matrix.ubuntu }}, arm64)
@@ -104,7 +113,8 @@ jobs:
         run: |
           echo "Waiting for PBS nodes to become free..."
           for i in $(seq 1 60); do
-            free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free'" 2>/dev/null || echo 0)
+            # free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free'" 2>/dev/null || echo 0)
+            free=$(docker exec pbs-server bash -lc "pbsnodes -a 2>/dev/null | grep -c 'state = free' || echo 0" 2>/dev/null)
             echo "Attempt $i: $free nodes free"
             [ "$free" -ge 3 ] && echo "All 3 nodes ready" && break
             sleep 5
@@ -135,6 +145,13 @@ jobs:
       -
         name: Shut down PBS cluster containers
         run: docker compose -f docker-compose.yml down
+      -
+        name: Debug session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 60
+        with:
+          limit-access-to-actor: true
 
   build:
     name: Build ${{ matrix.container }} (ubuntu-${{ matrix.ubuntu }}, ${{ matrix.arch }})
