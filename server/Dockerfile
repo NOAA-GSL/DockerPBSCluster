@@ -62,13 +62,41 @@ RUN git clone --branch v${OPENPBS_VERSION} --depth 1 https://github.com/openpbs/
  && /opt/pbs/libexec/pbs_postinstall \
  && rm -rf /tmp/openpbs
 
-# Fix race in pbs_db_utility install_db: the upstream script polls
-# `pbs_dataservice status`, which returns success as soon as the postgres
-# process exists -- before WAL recovery completes. createdb then hits
-# "FATAL: the database system is starting up". Replace that probe with
-# pg_isready (returns 0 only when postgres is accepting connections) and
-# bump the retry budget from ~12s to ~60s for slower CI runners.
-# Fail the build if any anchor changes upstream so we notice early.
+# Fix a race in pbs_db_utility install_db.
+#
+# Upstream's pbs_install_db() starts the data service and then waits for it
+# to come up with this loop (verbatim from v23.06.06 src/lib/Libdb/pgsql/pbs_db_utility):
+#
+#     ${server_ctl} start
+#     ...
+#     tries=5
+#     while [ $tries -ge 0 ]
+#     do
+#         ${server_ctl} status > /dev/null 2>&1   # <-- only checks "process exists"
+#         ret=$?
+#         if [ $ret -eq 0 ]; then break; fi
+#         tries=$((tries-1))
+#         sleep 2
+#     done
+#     # ... then runs createdb immediately ...
+#
+# `pbs_dataservice status` reports success as soon as the postgres process
+# is up, but postgres may still be in startup (WAL recovery, listen-socket
+# bind) and refusing new connections. createdb then fails with:
+#   FATAL:  the database system is starting up
+# followed by `Error creating PBS datastore` and install_db exits.
+#
+# This race was timing-sensitive: it manifested deterministically on
+# Ubuntu 24.04 / arm64 in CI but went unnoticed on the other three platform
+# combos. We close it by patching two lines in the installed script:
+#   - tries=5  -> tries=30   (bump the wait budget from ~12s to ~62s)
+#   - ${server_ctl} status   -> pg_isready, which only returns 0 when
+#                               postgres is actually accepting connections
+#
+# The grep -q calls before/after sed assert that the anchor lines exist
+# and that the substitution produced the expected result, so a future
+# upstream change or a botched sed will fail the build loudly instead of
+# silently producing a broken image.
 RUN grep -q '^	tries=5$' /opt/pbs/libexec/pbs_db_utility \
  && grep -q '\${server_ctl} status > /dev/null 2>&1' /opt/pbs/libexec/pbs_db_utility \
  && sed -i \

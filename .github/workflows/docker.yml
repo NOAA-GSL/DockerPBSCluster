@@ -78,13 +78,6 @@ jobs:
       -
         name: Shut down PBS cluster containers
         run: docker compose -f docker-compose.yml down
-      -
-        name: Debug session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 60
-        with:
-          limit-access-to-actor: true
 
 
   docker_compose_test_arm64:
@@ -149,13 +142,6 @@ jobs:
       -
         name: Shut down PBS cluster containers
         run: docker compose -f docker-compose.yml down
-      -
-        name: Debug session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 60
-        with:
-          limit-access-to-actor: true
 
   build:
     name: Build ${{ matrix.container }} (ubuntu-${{ matrix.ubuntu }}, ${{ matrix.arch }})
