@@ -53,6 +53,12 @@ services:
     depends_on:
       pbsfrontend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/pbs-server-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
   pbsnode1:
     <<: *node-common
     build:

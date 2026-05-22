@@ -33,10 +33,12 @@ jobs:
 
       -
         name: Check cluster logs
+        if: ${{ always() }}
         run: docker compose -f docker-compose.yml logs
 
       -
         name: Check status of the cluster containers
+        if: ${{ always() }}
         run: docker compose -f docker-compose.yml ps
 
       -
@@ -102,10 +104,12 @@ jobs:
 
       -
         name: Check cluster logs
+        if: ${{ always() }}
         run: docker compose -f docker-compose.yml logs
 
       -
         name: Check status of the cluster containers
+        if: ${{ always() }}
         run: docker compose -f docker-compose.yml ps
 
       -
