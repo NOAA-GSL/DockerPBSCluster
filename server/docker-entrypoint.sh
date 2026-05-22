@@ -82,12 +82,15 @@ for attempt in 1 2 3 4 5; do
     sudo pkill -9 -x postgres 2>/dev/null || true
     sudo rm -rf /var/spool/pbs/datastore 2>/dev/null || true
 
-    if sudo /opt/pbs/libexec/pbs_db_utility install_db; then
-        install_db_rc=0
+    # Use `|| install_db_rc=$?` rather than `if cmd; then ... fi`: after an
+    # `if`, $? is the exit status of the if statement itself (0 when the
+    # then-branch didn't run), so we'd report the wrong rc on failure.
+    install_db_rc=0
+    sudo /opt/pbs/libexec/pbs_db_utility install_db || install_db_rc=$?
+    if [ "$install_db_rc" -eq 0 ]; then
         echo "install_db succeeded on attempt $attempt."
         break
     fi
-    install_db_rc=$?
     echo "install_db attempt $attempt failed (rc=$install_db_rc); retrying in 10s..."
     sleep 10
 done
