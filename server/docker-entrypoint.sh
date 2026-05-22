@@ -58,45 +58,12 @@ trap 'on_error $LINENO' ERR
 #   failed: No such file or directory
 sudo install -d -o postgres -g postgres -m 2775 /var/run/postgresql
 
-# Initialize the PBS PostgreSQL datastore.
-# install_db has a known race condition: pbs_dataservice considers postgres
-# "started" as soon as the process is up, but createdb can hit "the database
-# system is starting up" if it connects before postgres finishes WAL recovery.
-# We retry the whole install_db invocation; each retry runs initdb from
-# scratch, so the race window is re-rolled. If we still fail after a few
-# attempts, we continue anyway: `pbs_server -t create` is able to bootstrap
-# the datastore itself and is the real source of truth for startup success.
-#
-# Calling install_db inside an `if` (or via `|| true`) is essential: the
-# `trap ... ERR` above fires on *any* simple-command non-zero exit, even
-# under `set +e`. Only the conditional context suppresses it.
+# Initialize the PBS PostgreSQL datastore. The historical race in install_db
+# (where createdb ran before postgres was accepting connections) is patched
+# at build time in the Dockerfile, so this is expected to succeed on the
+# first try. If it ever fails, the ERR trap will dump diagnostics.
 echo "Initializing PBS datastore (pbs_db_utility install_db)..."
-install_db_rc=1
-for attempt in 1 2 3 4 5; do
-    # Make sure no stale data-service state from a failed previous attempt is
-    # left around: pbs_dataservice's "cleanup" doesn't always tear down the
-    # pbs_ds_monitor process, which can confuse the next attempt.
-    # Match by process name only (not full cmdline) so pkill doesn't match
-    # its own sudo wrapper.
-    sudo pkill -9 -x pbs_ds_monitor 2>/dev/null || true
-    sudo pkill -9 -x postgres 2>/dev/null || true
-    sudo rm -rf /var/spool/pbs/datastore 2>/dev/null || true
-
-    # Use `|| install_db_rc=$?` rather than `if cmd; then ... fi`: after an
-    # `if`, $? is the exit status of the if statement itself (0 when the
-    # then-branch didn't run), so we'd report the wrong rc on failure.
-    install_db_rc=0
-    sudo /opt/pbs/libexec/pbs_db_utility install_db || install_db_rc=$?
-    if [ "$install_db_rc" -eq 0 ]; then
-        echo "install_db succeeded on attempt $attempt."
-        break
-    fi
-    echo "install_db attempt $attempt failed (rc=$install_db_rc); retrying in 10s..."
-    sleep 10
-done
-if [ "$install_db_rc" -ne 0 ]; then
-    echo "WARN: install_db failed after 5 attempts; will rely on pbs_server -t create to bootstrap."
-fi
+sudo /opt/pbs/libexec/pbs_db_utility install_db
 
 # Start pbs_comm first (pbs_server requires it)
 echo "Starting pbs_comm..."
