@@ -62,6 +62,22 @@ RUN git clone --branch v${OPENPBS_VERSION} --depth 1 https://github.com/openpbs/
  && /opt/pbs/libexec/pbs_postinstall \
  && rm -rf /tmp/openpbs
 
+# Fix race in pbs_db_utility install_db: the upstream script polls
+# `pbs_dataservice status`, which returns success as soon as the postgres
+# process exists -- before WAL recovery completes. createdb then hits
+# "FATAL: the database system is starting up". Replace that probe with
+# pg_isready (returns 0 only when postgres is accepting connections) and
+# bump the retry budget from ~12s to ~60s for slower CI runners.
+# Fail the build if any anchor changes upstream so we notice early.
+RUN grep -q '^	tries=5$' /opt/pbs/libexec/pbs_db_utility \
+ && grep -q '\${server_ctl} status > /dev/null 2>&1' /opt/pbs/libexec/pbs_db_utility \
+ && sed -i \
+        -e '0,/^	tries=5$/{s||	tries=30|}' \
+        -e 's|\${server_ctl} status > /dev/null 2>&1|\${bin_dir}/pg_isready -h /var/run/postgresql -p \${port} -q > /dev/null 2>\&1|' \
+        /opt/pbs/libexec/pbs_db_utility \
+ && grep -q 'pg_isready -h /var/run/postgresql -p \${port} -q > /dev/null 2>&1' /opt/pbs/libexec/pbs_db_utility \
+ && grep -q '^	tries=30$' /opt/pbs/libexec/pbs_db_utility
+
 # Create pbsdata system user required by PBS dataservice (normally done by package manager)
 RUN useradd -r -m -d /var/lib/pbsdata -s /bin/sh -G postgres pbsdata
 
