@@ -105,9 +105,16 @@ sudo /opt/pbs/bin/qmgr -c "set server scheduling = True" || true
 sudo /opt/pbs/bin/qmgr -c "set server flatuid = True" || true
 sudo /opt/pbs/bin/qmgr -c "set server job_history_enable = True" || true
 
-sudo /opt/pbs/bin/qmgr -c "create node pbsnode1" 2>/dev/null || true
-sudo /opt/pbs/bin/qmgr -c "create node pbsnode2" 2>/dev/null || true
-sudo /opt/pbs/bin/qmgr -c "create node pbsnode3" 2>/dev/null || true
+# Pre-declare a range of compute nodes, mirroring the Slurm base's
+# `NodeName=slurmnode[1-10]`. A pbsnodeN with no running mom just shows as
+# "down" (state-unknown); starting a pbsnodeN service brings it "free". This
+# lets the cluster grow purely by adding pbsnodeN services in compose -- the
+# same UX as the Slurm cluster. PBS_MAX_NODES is overridable from compose, so
+# growing past the default needs no base rebuild.
+PBS_MAX_NODES=${PBS_MAX_NODES:-10}
+for i in $(seq 1 "${PBS_MAX_NODES}"); do
+  sudo /opt/pbs/bin/qmgr -c "create node pbsnode${i}" 2>/dev/null || true
+done
 
 # Create a queuejob hook that defaults output/error paths to the submission
 # directory (PBS_O_WORKDIR) instead of $HOME on the submission host.
