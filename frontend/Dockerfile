@@ -34,7 +34,8 @@ RUN apt-get update -y && apt-get install -y \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && rm -f /etc/ssl/private/ssl-cert-snakeoil.key \
- && rm -f /etc/ssl/certs/ssl-cert-snakeoil.pem
+ && rm -f /etc/ssl/certs/ssl-cert-snakeoil.pem \
+ && rm -f /usr/bin/pebble
 
 # Create stub eval.h for Python 3.13+ compatibility (header removed but API still present)
 RUN python3 -c "import sysconfig; open(sysconfig.get_path('include')+'/eval.h','w').write('#pragma once\n')"
