@@ -143,10 +143,62 @@ jobs:
         name: Shut down PBS cluster containers
         run: docker compose -f docker-compose.yml down
 
+  generate_compose_tests:
+    name: generate-compose.py unit tests
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout Repository
+        uses: actions/checkout@v4
+      -
+        name: Run unit tests
+        run: python3 -m unittest test_generate_compose.py -v
+
+  cluster_name_test:
+    name: CLUSTER_NAME simultaneous clusters
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout Repository
+        uses: actions/checkout@v4
+      -
+        name: Generate a 2-node compose file
+        run: ./generate-compose.py --nodes 2
+      -
+        name: Build images
+        run: docker compose build
+      -
+        name: Start two simultaneous clusters with distinct CLUSTER_NAME
+        run: |
+          CLUSTER_NAME=clustera docker compose -p clustera up -d --wait
+          CLUSTER_NAME=clusterb docker compose -p clusterb up -d --wait
+      -
+        name: Check container names reflect CLUSTER_NAME
+        run: |
+          for name in clustera-frontend clustera-server clustera-node1 clustera-node2 \
+                      clusterb-frontend clusterb-server clusterb-node1 clusterb-node2; do
+            docker ps --format '{{.Names}}' | grep -qx "$name"
+          done
+      -
+        name: Check status of PBS in both clusters
+        run: |
+          docker exec clustera-server bash -lc "qstat -Bf"
+          docker exec clusterb-server bash -lc "qstat -Bf"
+      -
+        name: Run a PBS job in both clusters simultaneously
+        run: |
+          docker exec clustera-frontend bash -lc "echo hostname | qsub"
+          docker exec clusterb-frontend bash -lc "echo hostname | qsub"
+      -
+        name: Shut down both clusters
+        run: |
+          docker compose -p clustera down --remove-orphans
+          docker compose -p clusterb down --remove-orphans
+
   build:
     name: Build ${{ matrix.container }} (ubuntu-${{ matrix.ubuntu }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    needs: [docker_compose_test_amd64, docker_compose_test_arm64]
+    needs: [docker_compose_test_amd64, docker_compose_test_arm64, generate_compose_tests, cluster_name_test]
     timeout-minutes: 360
     permissions:
       packages: write
