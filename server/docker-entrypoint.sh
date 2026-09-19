@@ -120,6 +120,7 @@ done
 # directory (PBS_O_WORKDIR) instead of $HOME on the submission host.
 # PBS treats a bare directory path (no hostname) as a local path, so pbs_mom
 # on the compute node writes directly to the shared /home/admin volume.
+# Only fill in paths the user left unset: an explicit -o/-e must be honored.
 cat > /tmp/default_output_dir.py << 'PYEOF'
 import pbs
 e = pbs.event()
@@ -127,8 +128,10 @@ j = e.job
 try:
     workdir = str(j.Variable_List['PBS_O_WORKDIR'])
     if workdir:
-        j.Output_Path = workdir
-        j.Error_Path = workdir
+        if j.Output_Path is None:
+            j.Output_Path = workdir
+        if j.Error_Path is None:
+            j.Error_Path = workdir
 except Exception as ex:
     pbs.logmsg(pbs.LOG_DEBUG, 'default_output_dir: ' + str(ex))
 e.accept()

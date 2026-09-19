@@ -1,2 +1,2 @@
-Host pbsnode* pbsfrontend pbsserver
+Host pbsnode* pbsfrontend pbsserver *-frontend *-frontend.*
    StrictHostKeyChecking no

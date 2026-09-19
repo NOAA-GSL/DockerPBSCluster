@@ -58,7 +58,8 @@ RUN echo "PBS_EXEC=/opt/pbs"           >  /etc/pbs.conf \
  && echo "PBS_START_SERVER=0"          >> /etc/pbs.conf \
  && echo "PBS_START_SCHED=0"           >> /etc/pbs.conf \
  && echo "PBS_START_COMM=0"            >> /etc/pbs.conf \
- && echo "PBS_START_MOM=1"             >> /etc/pbs.conf
+ && echo "PBS_START_MOM=1"             >> /etc/pbs.conf \
+ && echo "PBS_SCP=/usr/bin/scp"        >> /etc/pbs.conf
 
 # Create admin user
 RUN useradd -m admin -s /usr/bin/bash -d /home/admin \
@@ -71,6 +72,12 @@ RUN mkdir -p /var/run/sshd \
  && sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd \
  && chmod -x /etc/update-motd.d/* \
  && rm -f /etc/legal
+
+# pbs_mom delivers output for paths outside the shared /home/admin volume
+# (e.g. -o /tmp/x.log) back to the submit host with scp in batch mode. The
+# submit host can appear under its short name or the compose-qualified
+# container name (<cluster>-frontend.<project>_default), so trust both.
+COPY ssh/config /etc/ssh/ssh_config.d/pbs-cluster.conf
 
 # Add PBS binaries to system PATH
 RUN echo 'export PATH=/opt/pbs/bin:/opt/pbs/sbin:$PATH' >> /etc/profile.d/pbs.sh \
